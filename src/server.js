@@ -1,45 +1,104 @@
 import express from "express";
-import { products as productsRaw, cartItems as cartItemsRaw } from "./temp-data.js";
+import { MongoClient } from "mongodb";
+import path from "path";
+import { fileURLToPath } from "url";
+import dotenv from "dotenv";
+dotenv.config();
 
-const app = express();
-let cartItems = cartItemsRaw;
-let products = productsRaw;
-app.use(express.json());
+async function start() {
+  const url = process.env.MONGODB_URL;
+  const client = new MongoClient(url);
 
-app.get("/hello", (req, res) => {
-  res.send("Hello");
-});
+  //   general
+  await client.connect();
+  const db = client.db("chilaiadima");
 
-app.get("/products", (req, res) => {
-  res.json(products);
-});
+  const app = express();
+  app.use(express.json());
 
-const populatedCartIds = (ids) => {
-  return ids.map((id) => products.find((product) => product.id === id));
-};
-app.get("/cart", (req, res) => {
-  const populatedCart = populatedCartIds(cartItems);
-  res.json(populatedCart);
-});
-app.post("/cart", (req, res) => {
-  const productId = req.body.id;
-  cartItems.push(productId);
-  const populatedCart = populatedCartIds(cartItems);
-  res.json(populatedCart);
-});
-app.delete("/cart/:productId", (req, res) => {
-  const productId = req.params.productId;
-  cartItems = cartItems.filter((id) => id !== productId);
-  const populatedCart = populatedCartIds(cartItems);
-  res.json(populatedCart);
-});
+  const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-app.get("/products/:productId", (req, res) => {
-  const productId = req.params.productId;
-  const product = products.find((product) => product.id === productId);
-  res.json(product);
-});
+  const img = app.use("/images", express.static(path.join(__dirname, "../assets")));
+  app.get("/api/products", async (req, res) => {
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 2;
+    const skip = (page - 1) * limit;
 
-app.listen(3000, () => {
-  console.log("Server is running on port 3000");
-});
+    const products = await db.collection("products").find({}).skip(skip).limit(limit).toArray();
+    res.send(products);
+  });
+
+  const populatedCartIds = async (ids) => {
+    const validIds = ids.filter((id) => id != null);
+    const products = await Promise.all(
+      validIds.map(async (id) => {
+        const product = await db.collection("products").findOne({ id: String(id) });
+        if (!product) {
+          console.log(`Product with ID ${id} not found`);
+        }
+        return product;
+      })
+    );
+
+    return products.filter((product) => product != null);
+  };
+
+  app.get("/api/users/:userId/cart", async (req, res) => {
+    const user = await db.collection("users").findOne({ id: req.params.userId });
+    const populatedCart = await populatedCartIds(user.cartItems);
+    res.json(populatedCart);
+  });
+  app.put("/api/products/:productId", async (req, res) => {
+    const productId = req.params.productId;
+    const updatedProductData = req.body;
+
+    const result = await db.collection("products").updateOne({ id: productId }, { $set: updatedProductData });
+
+    if (result.matchedCount === 0) {
+      res.status(404).json({ error: "Product not found" });
+    } else {
+      // Return the updated product data
+      const updatedProduct = await db.collection("products").findOne({ id: productId });
+      res.json(updatedProduct);
+    }
+  });
+
+  app.post("/api/products", async (req, res) => {
+    const newProduct = req.body;
+    await db.collection("products").insertOne(newProduct);
+    res.status(201).json(newProduct);
+  });
+
+  app.post("/api/users/:userId/cart", async (req, res) => {
+    const userId = req.params.userId;
+    const productId = req.body.id;
+    await db.collection("users").updateOne({ id: userId }, { $addToSet: { cartItems: productId } });
+
+    const user = await db.collection("users").findOne({ id: req.params.userId });
+    const populatedCart = await populatedCartIds(user.cartItems);
+    res.json(populatedCart);
+  });
+
+  app.delete("/api/users/:userId/cart/:productId", async (req, res) => {
+    const userId = req.params.userId;
+    const productId = req.params.productId;
+
+    await db.collection("users").updateOne({ id: userId }, { $pull: { cartItems: productId } });
+
+    const user = await db.collection("users").findOne({ id: req.params.userId });
+    const populatedCart = await populatedCartIds(user.cartItems);
+    res.json(populatedCart);
+  });
+
+  app.get("/api/products/:productId", async (req, res) => {
+    const productId = req.params.productId;
+    const product = await db.collection("products").findOne({ id: productId });
+    res.json(product);
+  });
+
+  app.listen(8000, () => {
+    console.log("Server is running on port 8000");
+  });
+}
+
+start();
