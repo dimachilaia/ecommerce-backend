@@ -5,7 +5,7 @@ import { fileURLToPath } from "url";
 import dotenv from "dotenv";
 dotenv.config();
 
-async function start() {
+const start = async () => {
   const url = process.env.MONGODB_URL;
   const client = new MongoClient(url);
 
@@ -99,6 +99,6 @@ async function start() {
   app.listen(8000, () => {
     console.log("Server is running on port 8000");
   });
-}
+};
 
 start();
