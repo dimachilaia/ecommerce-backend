@@ -42,6 +42,20 @@ const start = async () => {
 
     return products.filter((product) => product != null);
   };
+  app.put("/api/users/:userId/cart/:productId", async (req, res) => {
+    const userId = req.params.userId;
+    const productId = req.params.productId;
+    const quantity = parseInt(req.body.quantity);
+    const updateResult = await db.collection("users").updateOne({ id: userId, "cartItems.id": productId }, { $set: { "cartItems.$.quantity": quantity } });
+
+    if (updateResult.matchedCount === 0) {
+      res.status(404).json({ error: "User or product not found in cart" });
+    } else {
+      const user = await db.collection("users").findOne({ id: userId });
+      const populatedCart = await populatedCartIds(user.cartItems);
+      res.json(populatedCart);
+    }
+  });
 
   app.get("/api/users/:userId/cart", async (req, res) => {
     const user = await db.collection("users").findOne({ id: req.params.userId });
@@ -57,7 +71,6 @@ const start = async () => {
     if (result.matchedCount === 0) {
       res.status(404).json({ error: "Product not found" });
     } else {
-      // Return the updated product data
       const updatedProduct = await db.collection("products").findOne({ id: productId });
       res.json(updatedProduct);
     }
